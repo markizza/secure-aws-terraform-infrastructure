@@ -564,3 +564,228 @@ The environment was returned to a secure state after the completed tests.
 - **EC2 instance:** `Stopped`
 
 The attempted public bucket policy did not need to be removed because the save operation was rejected and the policy never came into existence.
+
+## 7. Security Group Egress Restriction
+
+The instance's outbound Security Group rule initially permitted all traffic to `0.0.0.0/0`, which is the AWS default.
+
+This was replaced with a more restrictive outbound ruleset permitting only DNS, HTTP, and HTTPS traffic required by the current workload.
+
+### 7a — Outbound Rules Before the Change
+
+Before the restriction, the Security Group contained the default outbound rule permitting all IPv4 traffic to any destination:
+
+```text
+Type:        All traffic
+Protocol:    All
+Port range:  All
+Destination: 0.0.0.0/0
+```
+
+![Original unrestricted Security Group outbound rule](images/sg-01-outbound-unrestricted.png)
+
+This configuration allowed the instance to initiate connections using any protocol and port to any IPv4 destination.
+
+### 7b — Determining the DNS Resolver
+
+The instance's resolver configuration was inspected before changing the outbound rules.
+
+```text
+ubuntu@ip-10-0-1-6:/$ cat /etc/resolv.conf
+# This is /run/systemd/resolve/stub-resolv.conf managed by man:systemd-resolved(8).
+# Do not edit.
+#
+# This file might be symlinked as /etc/resolv.conf. If you're looking at
+# /etc/resolv.conf and seeing this text, you have followed the symlink.
+#
+# This is a dynamic resolv.conf file for connecting local clients to the
+# internal DNS stub resolver of systemd-resolved. This file lists all
+# configured search domains.
+#
+# Run "resolvectl status" to see details about the uplink DNS servers
+# currently in use.
+#
+# Third party programs should typically not access this file directly, but only
+# through the symlink at /etc/resolv.conf. To manage man:resolv.conf(5) in a
+# different way, replace this symlink by a static file or a different symlink.
+#
+# See man:systemd-resolved.service(8) for details about the supported modes of
+# operation for /etc/resolv.conf.
+
+nameserver 127.0.0.53
+options edns0 trust-ad
+search eu-west-2.compute.internal
+ubuntu@ip-10-0-1-6:/$ resolvectl status
+Global
+         Protocols: -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+  resolv.conf mode: stub
+
+Link 2 (ens5)
+    Current Scopes: DNS
+         Protocols: +DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+Current DNS Server: 10.0.0.2
+       DNS Servers: 10.0.0.2
+        DNS Domain: eu-west-2.compute.internal
+```
+
+`127.0.0.53` is the local `systemd-resolved` stub listener.
+
+`resolvectl status` shows that the upstream resolver is:
+
+```text
+10.0.0.2
+```
+
+The VPC uses:
+
+```text
+10.0.0.0/16
+```
+
+and the Amazon-provided resolver is available at the VPC base address plus two:
+
+```text
+10.0.0.2
+```
+
+A `/32` represents one IPv4 address only:
+
+```text
+10.0.0.2/32 → only 10.0.0.2
+```
+
+By comparison:
+
+```text
+10.0.0.0/24 → 10.0.0.0 through 10.0.0.255
+```
+
+Therefore, `/32` is appropriate when referring specifically to the single resolver address.
+
+An AWS-specific exception applies: Security Groups do not filter DNS traffic to or from the Amazon-provided Route 53 Resolver at `10.0.0.2`.
+
+The DNS rules are nevertheless retained intentionally. They document the intended DNS destination, and no broader outbound rule permits TCP or UDP port `53` to arbitrary external resolvers.
+
+### 7c — Outbound Ruleset Applied
+
+The unrestricted `All traffic` outbound rule was removed and replaced with:
+
+| Type | Protocol | Port | Destination | Purpose |
+|---|---|---:|---|---|
+| HTTP | TCP | `80` | `0.0.0.0/0` | Package repository and required HTTP connectivity |
+| HTTPS | TCP | `443` | `0.0.0.0/0` | Package repository and required HTTPS connectivity |
+| DNS | TCP | `53` | `10.0.0.2/32` | Intended DNS resolver; TCP fallback and larger responses |
+| DNS | UDP | `53` | `10.0.0.2/32` | Intended DNS resolver for standard DNS queries |
+
+![Restricted Security Group outbound rules](images/sg-02-outbound-restricted.png)
+
+HTTP and HTTPS remain permitted to `0.0.0.0/0`.
+
+Security Groups operate on IP address, protocol, and port rather than application hostnames. The practical reason these web rules remain broadly scoped is demonstrated by the connectivity test in the next section.
+
+### 7d — Connectivity Confirmed After Restriction
+
+After applying the restricted outbound rules, package repository connectivity was tested again using:
+
+```bash
+sudo apt update
+```
+
+```text
+ubuntu@ip-10-0-1-6:/$ sudo apt update
+Hit:1 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble InRelease
+Get:2 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+Get:3 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
+Get:4 http://security.ubuntu.com/ubuntu noble-security InRelease [126 kB]
+Get:5 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1275 kB]
+Get:6 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [181 kB]
+Get:7 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1689 kB]
+Get:8 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [387 kB]
+Get:9 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
+Get:10 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-backports/main amd64 Packages [40.6 kB]
+Get:11 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [5744 B]
+Get:12 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Packages [31.0 kB]
+Get:13 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-backports/universe Translation-en [18.6 kB]
+Get:14 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [12.6 kB]
+Get:15 http://security.ubuntu.com/ubuntu noble-security/main amd64 Components [46.4 kB]
+Get:16 http://security.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1208 kB]
+Get:17 http://security.ubuntu.com/ubuntu noble-security/universe amd64 Components [76.3 kB]
+Fetched 5351 kB in 1s (4114 kB/s)
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+35 packages can be upgraded. Run 'apt list --upgradable' to see them.
+```
+
+The output contained successful `Hit:` and/or `Get:` responses from multiple Ubuntu package sources, including:
+
+```text
+eu-west-2.ec2.archive.ubuntu.com
+security.ubuntu.com
+```
+
+This demonstrates that the instance retained required package-management connectivity after the unrestricted all-traffic rule was removed.
+
+It also shows why restricting HTTP egress to a single fixed destination would be unreliable: normal package updates reached at least two different hostnames, and their backing IP addresses may change.
+
+For this stage, the required web egress therefore remains:
+
+```text
+TCP 80  → 0.0.0.0/0
+TCP 443 → 0.0.0.0/0
+```
+
+**Result:** required package-management connectivity remained available after the egress restriction.
+
+### 7e — Existing SSH Session Unaffected
+
+The SSH session established before the Security Group change remained usable throughout the test.
+
+Security Groups are stateful.
+
+Return traffic associated with an allowed inbound SSH connection is automatically permitted and does not require a separate outbound TCP `22` rule.
+
+The egress restriction therefore did not terminate the existing SSH session.
+
+### 7f — Residual Egress Exposure
+
+The original unrestricted rule:
+
+```text
+All traffic
+All protocols
+All ports
+0.0.0.0/0
+```
+
+has been removed.
+
+The remaining general internet-facing egress is:
+
+```text
+TCP 80  → 0.0.0.0/0
+TCP 443 → 0.0.0.0/0
+```
+
+This is substantially narrower than permitting every protocol and port, but HTTP and HTTPS can still reach arbitrary internet destinations.
+
+DNS remains documented as:
+
+```text
+UDP 53 → 10.0.0.2/32
+TCP 53 → 10.0.0.2/32
+```
+
+although Security Groups do not evaluate traffic to the Amazon-provided resolver itself.
+
+This does not prevent DNS-over-HTTPS traffic from using the currently permitted TCP `443` path.
+
+Further restriction would require additional controls such as:
+
+- an egress proxy
+- AWS Network Firewall
+- managed or custom prefix lists where suitable
+- application-aware filtering
+- Route 53 Resolver DNS Firewall for DNS-specific policy enforcement
+
+**Result:** unrestricted all-protocol egress was removed successfully while required package-management, DNS-resolution, and SSH functionality remained available.
