@@ -39,6 +39,9 @@ The environment currently contains:
 - S3 Block Public Access enabled
 - S3 Versioning enabled
 - S3 default encryption using `SSE-S3`
+- Multi-Region CloudTrail trail enabled
+- CloudTrail management events delivered to S3
+- CloudTrail log file validation enabled
 
 ![VPC resource map showing subnets, route tables and Internet Gateway](docs/images/vpc-resource-map.png)
 
@@ -153,6 +156,30 @@ A public bucket policy using:
 was rejected at save time.
 
 Further evidence, including encryption, versioning, recovery, Block Public Access, and anonymous-access testing, is recorded in [`docs/evidence.md`](docs/evidence.md).
+
+---
+
+### CloudTrail Audit Logging
+
+A multi-Region CloudTrail trail delivers management events to S3 with log file validation enabled.
+
+Testing confirmed that:
+
+- a Security Group rule change was recorded as both `AuthorizeSecurityGroupEgress` and `RevokeSecurityGroupEgress`
+- the events were located in the delivered `.json.gz` log object
+- `requestParameters` recorded the exact rule changed, including protocol, port range, destination CIDR, and Security Group ID
+- the API records showed whether each operation succeeded
+- the events recorded the acting identity, timestamp, Region, source address, and user agent
+
+The test generated a temporary outbound POP3 rule on TCP `110`, then removed it. CloudTrail recorded both the change and rollback, allowing the sequence to be reconstructed from the delivered logs.
+
+**Known limitation:** the trail writes to an S3 bucket in the same AWS account it audits. The workload and its audit records therefore remain within the same administrative trust boundary.
+
+Log file validation provides integrity evidence and can help detect modification or deletion of covered log files, but it does not itself prevent a sufficiently privileged principal from interfering with the log bucket.
+
+A stronger production design would use a dedicated logging account, with workload accounts unable to administer or delete the central audit records.
+
+Full CloudTrail evidence is recorded in [`docs/evidence.md`](docs/evidence.md).
 
 ---
 
@@ -284,7 +311,6 @@ The full experiment, including the original hypothesis, observed behaviour, root
 
 The following have not yet been implemented:
 
-- Enable AWS CloudTrail
 - Introduce Terraform
 - Store Terraform state locally during the first Terraform implementation
 - Recreate the existing AWS infrastructure using Terraform
