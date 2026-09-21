@@ -31,7 +31,8 @@ The environment currently contains:
 - Internet Gateway
 - Separate public and private route tables
 - One Ubuntu EC2 instance in the public subnet
-- Security Group controlling access to the EC2 instance
+- Security Group with restricted outbound HTTP, HTTPS, and DNS rules
+- Known limitation: Security Groups do not filter DNS traffic to the Amazon-provided Route 53 Resolver
 - EC2 Instance Metadata Service configured to require IMDSv2
 - Metadata response hop limit set to `1`
 - One S3 bucket in `eu-west-2`
@@ -85,9 +86,18 @@ The public IPv4 address is not configured directly on the Linux network interfac
 
 No other inbound rules are configured. The source address is redacted in the screenshot below.
 
-**Outbound:** all traffic is currently permitted to `0.0.0.0/0`.
+**Outbound:** the default unrestricted `All traffic → 0.0.0.0/0` rule was removed and replaced with:
 
-This is the AWS default and has not yet been restricted. It is required in the current build for commands such as `apt update` to reach Ubuntu package repositories.
+- TCP `80` → `0.0.0.0/0`
+- TCP `443` → `0.0.0.0/0`
+- UDP `53` → `10.0.0.2/32`
+- TCP `53` → `10.0.0.2/32`
+
+HTTP and HTTPS remain broadly permitted because package-management traffic reaches multiple external destinations whose IP addresses may change.
+
+The DNS rules document the intended resolver at `10.0.0.2`. However, AWS Security Groups do not filter traffic to or from the Amazon-provided Route 53 Resolver, so this is a known limitation of the current control.
+
+Full egress-restriction testing is documented in [`docs/evidence.md`](docs/evidence.md).
 
 ![Security group inbound rule permitting TCP 22 from a single /32](docs/images/security-group-inbound-ssh.png)
 
@@ -275,9 +285,6 @@ The full experiment, including the original hypothesis, observed behaviour, root
 The following have not yet been implemented:
 
 - Enable AWS CloudTrail
-- Evaluate enabling S3 MFA Delete to add protection against permanent deletion of object versions
-- Review and restrict Security Group outbound traffic instead of retaining unrestricted `0.0.0.0/0` egress
-- Complete the non-public S3 bucket-policy control test and remove the temporary policy afterwards
 - Introduce Terraform
 - Store Terraform state locally during the first Terraform implementation
 - Recreate the existing AWS infrastructure using Terraform
