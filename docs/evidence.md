@@ -789,3 +789,577 @@ Further restriction would require additional controls such as:
 - Route 53 Resolver DNS Firewall for DNS-specific policy enforcement
 
 **Result:** unrestricted all-protocol egress was removed successfully while required package-management, DNS-resolution, and SSH functionality remained available.
+
+## 8. CloudTrail Management Event Logging
+
+AWS CloudTrail was enabled to create a persistent audit trail of management activity in the AWS account.
+
+The test focused on whether a deliberate Security Group configuration change could later be reconstructed from the CloudTrail records delivered to Amazon S3.
+
+### 8a — Trail Configuration
+
+The CloudTrail trail was configured as follows:
+
+- **Trail name:** `management-events`
+- **Trail logging:** `Logging`
+- **Scope:** Multi-Region
+- **Organization trail:** Not enabled
+- **Log destination:** Amazon S3
+- **Log file validation:** Enabled
+- **SSE-KMS encryption:** Not enabled
+- **SNS notification delivery:** Disabled
+- **Recursive logging:** Enabled
+
+![CloudTrail trail configuration](images/cloudtrail-01-trail-config.png)
+
+A Multi-Region trail was selected so that management activity is not limited to events generated only in `eu-west-2`.
+
+Log file validation was enabled to provide integrity evidence for delivered CloudTrail log files.
+
+The destination bucket, account ID, and trail ARN are redacted in the public evidence because they are not required to demonstrate the control.
+
+---
+
+### 8b — CloudTrail Destination Bucket Policy
+
+Creating the trail added permissions to the destination S3 bucket so that the CloudTrail service can verify the bucket and deliver log objects.
+
+The actual bucket policy configured on the destination bucket was:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AWSCloudTrailAclCheck20150319-e529c59d-4569-4d57-8aa3-a9ecf52c7af3",
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "cloudtrail.amazonaws.com"
+            },
+            "Action": "s3:GetBucketAcl",
+            "Resource": "arn:aws:s3:::[CLOUDTRAIL-BUCKET-REDACTED]",
+            "Condition": {
+                "StringEquals": {
+                    "AWS:SourceArn": "arn:aws:cloudtrail:eu-west-2:[ACCOUNT-ID-REDACTED]:trail/management-events"
+                }
+            }
+        },
+        {
+            "Sid": "AWSCloudTrailWrite20150319-abb11b64-b9f7-4b90-b48a-340800a0a87f",
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "cloudtrail.amazonaws.com"
+            },
+            "Action": "s3:PutObject",
+            "Resource": "arn:aws:s3:::[CLOUDTRAIL-BUCKET-REDACTED]/AWSLogs/[ACCOUNT-ID-REDACTED]/*",
+            "Condition": {
+                "StringEquals": {
+                    "AWS:SourceArn": "arn:aws:cloudtrail:eu-west-2:[ACCOUNT-ID-REDACTED]:trail/management-events",
+                    "s3:x-amz-acl": "bucket-owner-full-control"
+                }
+            }
+        }
+    ]
+}
+```
+
+The policy contains two CloudTrail service permissions.
+
+`cloudtrail.amazonaws.com` is granted:
+
+```text
+s3:GetBucketAcl
+```
+
+so CloudTrail can check the destination bucket.
+
+It is also granted:
+
+```text
+s3:PutObject
+```
+
+for the account-specific CloudTrail log prefix:
+
+```text
+AWSLogs/[ACCOUNT-ID-REDACTED]/*
+```
+
+The `AWS:SourceArn` condition restricts these permissions to the specific trail:
+
+```text
+management-events
+```
+
+rather than granting the permissions generally to any CloudTrail trail.
+
+The write statement also requires:
+
+```text
+s3:x-amz-acl = bucket-owner-full-control
+```
+
+for objects delivered by CloudTrail.
+
+---
+
+### 8c — Log Delivery Path
+
+The CloudTrail management events were located in the following delivered S3 object:
+
+```text
+s3://[CLOUDTRAIL-BUCKET-REDACTED]/AWSLogs/[ACCOUNT-ID-REDACTED]/CloudTrail/eu-west-2/2026/09/21/[ACCOUNT-ID-REDACTED]_CloudTrail_eu-west-2_20260921T0755Z_mCmJoucdI7CsDDn6.json.gz
+```
+
+The object path shows CloudTrail's account-, Region-, and date-based organisation:
+
+```text
+AWSLogs/
+└── [ACCOUNT-ID-REDACTED]/
+    └── CloudTrail/
+        └── eu-west-2/
+            └── 2026/
+                └── 09/
+                    └── 21/
+                        └── [LOG-FILE].json.gz
+```
+
+The relevant filename is:
+
+```text
+[ACCOUNT-ID-REDACTED]_CloudTrail_eu-west-2_20260921T0755Z_mCmJoucdI7CsDDn6.json.gz
+```
+
+The path identifies:
+
+- the AWS account
+- CloudTrail as the log type
+- Region `eu-west-2`
+- year `2026`
+- month `09`
+- day `21`
+
+The filename contains the timestamp component:
+
+```text
+20260921T0755Z
+```
+
+---
+
+### 8d — Test Action Performed
+
+To generate a known management event after the trail was enabled, a temporary outbound Security Group rule was deliberately added and then removed.
+
+The temporary rule was:
+
+```text
+Type:        POP3
+Protocol:    TCP
+Port:        110
+Destination: 0.0.0.0/0
+```
+
+POP3 was chosen because the current EC2 workload does not require TCP port `110`, so the temporary rule could be created and removed without affecting the workload.
+
+CloudTrail recorded the rule being added at:
+
+```text
+2026-09-21T07:52:36Z
+```
+
+and removed at:
+
+```text
+2026-09-21T07:52:48Z
+```
+
+The timestamps are recorded in UTC.
+
+The temporary rule therefore existed for approximately:
+
+```text
+12 seconds
+```
+
+before being revoked.
+
+---
+
+### 8e — Events Located in the Delivered Log
+
+The delivered CloudTrail log contained both sides of the Security Group configuration change:
+
+```text
+AuthorizeSecurityGroupEgress
+RevokeSecurityGroupEgress
+```
+
+Both events were located in:
+
+```text
+s3://[CLOUDTRAIL-BUCKET-REDACTED]/AWSLogs/[ACCOUNT-ID-REDACTED]/CloudTrail/eu-west-2/2026/09/21/[ACCOUNT-ID-REDACTED]_CloudTrail_eu-west-2_20260921T0755Z_mCmJoucdI7CsDDn6.json.gz
+```
+
+#### Authorize Event
+
+```json
+{
+    "eventVersion": "1.11",
+    "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "[REDACTED]",
+        "arn": "[REDACTED]",
+        "accountId": "[REDACTED]",
+        "accessKeyId": "[REDACTED]",
+        "userName": "[IAM-USER-REDACTED]",
+        "sessionContext": {
+            "attributes": {
+                "creationDate": "2026-09-21T05:11:44Z",
+                "mfaAuthenticated": "true"
+            }
+        }
+    },
+    "eventTime": "2026-09-21T07:52:36Z",
+    "eventSource": "ec2.amazonaws.com",
+    "eventName": "AuthorizeSecurityGroupEgress",
+    "awsRegion": "eu-west-2",
+    "sourceIPAddress": "[REDACTED]",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "requestParameters": {
+        "groupId": "[REDACTED]",
+        "ipPermissions": {
+            "items": [
+                {
+                    "ipProtocol": "tcp",
+                    "fromPort": 110,
+                    "toPort": 110,
+                    "groups": {},
+                    "ipRanges": {
+                        "items": [
+                            {
+                                "cidrIp": "0.0.0.0/0"
+                            }
+                        ]
+                    },
+                    "ipv6Ranges": {},
+                    "prefixListIds": {}
+                }
+            ]
+        }
+    },
+    "responseElements": {
+        "requestId": "6a7ba493-6b94-46a7-9207-6c4aed49e5aa",
+        "_return": true,
+        "securityGroupRuleSet": {
+            "items": [
+                {
+                    "groupOwnerId": "[REDACTED]",
+                    "groupId": "[REDACTED]",
+                    "securityGroupRuleId": "[REDACTED]",
+                    "isEgress": true,
+                    "ipProtocol": "tcp",
+                    "fromPort": 110,
+                    "toPort": 110,
+                    "cidrIpv4": "0.0.0.0/0",
+                    "securityGroupRuleArn": "[REDACTED]"
+                }
+            ]
+        }
+    },
+    "requestID": "6a7ba493-6b94-46a7-9207-6c4aed49e5aa",
+    "eventID": "8b128ffa-e07e-485d-8bbe-3cb593b2c19d",
+    "readOnly": false,
+    "eventType": "AwsApiCall",
+    "managementEvent": true,
+    "recipientAccountId": "[REDACTED]",
+    "eventCategory": "Management",
+    "tlsDetails": {
+        "tlsVersion": "TLSv1.3",
+        "cipherSuite": "TLS_AES_128_GCM_SHA256",
+        "clientProvidedHostHeader": "ec2.eu-west-2.amazonaws.com"
+    },
+    "sessionCredentialFromConsole": "true"
+}
+```
+
+The event records the creation of the temporary egress rule.
+
+The relevant fields show:
+
+```text
+eventName:      AuthorizeSecurityGroupEgress
+eventSource:    ec2.amazonaws.com
+awsRegion:      eu-west-2
+managementEvent: true
+readOnly:       false
+```
+
+The exact rule appears in `requestParameters`:
+
+```text
+Protocol:    TCP
+From port:   110
+To port:     110
+Destination: 0.0.0.0/0
+```
+
+The API operation succeeded:
+
+```text
+"_return": true
+```
+
+The identity information also shows:
+
+```text
+type:             IAMUser
+mfaAuthenticated: true
+```
+
+and:
+
+```text
+sessionCredentialFromConsole: true
+```
+
+showing that the API call originated from an authenticated AWS Management Console session.
+
+#### Revoke Event
+
+```json
+{
+    "eventVersion": "1.11",
+    "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "[REDACTED]",
+        "arn": "[REDACTED]",
+        "accountId": "[REDACTED]",
+        "accessKeyId": "[REDACTED]",
+        "userName": "[IAM-USER-REDACTED]",
+        "sessionContext": {
+            "attributes": {
+                "creationDate": "2026-09-21T05:11:44Z",
+                "mfaAuthenticated": "true"
+            }
+        }
+    },
+    "eventTime": "2026-09-21T07:52:48Z",
+    "eventSource": "ec2.amazonaws.com",
+    "eventName": "RevokeSecurityGroupEgress",
+    "awsRegion": "eu-west-2",
+    "sourceIPAddress": "[REDACTED]",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "requestParameters": {
+        "groupId": "[REDACTED]",
+        "ipPermissions": {
+            "items": [
+                {
+                    "ipProtocol": "tcp",
+                    "fromPort": 110,
+                    "toPort": 110,
+                    "groups": {},
+                    "ipRanges": {
+                        "items": [
+                            {
+                                "cidrIp": "0.0.0.0/0"
+                            }
+                        ]
+                    },
+                    "ipv6Ranges": {},
+                    "prefixListIds": {}
+                }
+            ]
+        }
+    },
+    "responseElements": {
+        "requestId": "58daaf83-9aba-454e-a876-07225e8cbdc5",
+        "_return": true,
+        "revokedSecurityGroupRuleSet": {
+            "items": [
+                {
+                    "groupId": "[REDACTED]",
+                    "securityGroupRuleId": "[REDACTED]",
+                    "isEgress": true,
+                    "ipProtocol": "tcp",
+                    "fromPort": 110,
+                    "toPort": 110,
+                    "cidrIpv4": "0.0.0.0/0"
+                }
+            ]
+        }
+    },
+    "requestID": "58daaf83-9aba-454e-a876-07225e8cbdc5",
+    "eventID": "a2c98759-8049-40ee-a240-949821bdba8d",
+    "readOnly": false,
+    "eventType": "AwsApiCall",
+    "managementEvent": true,
+    "recipientAccountId": "[REDACTED]",
+    "eventCategory": "Management",
+    "tlsDetails": {
+        "tlsVersion": "TLSv1.3",
+        "cipherSuite": "TLS_AES_128_GCM_SHA256",
+        "clientProvidedHostHeader": "ec2.eu-west-2.amazonaws.com"
+    },
+    "sessionCredentialFromConsole": "true"
+}
+```
+
+The second event records removal of the same Security Group rule:
+
+```text
+eventName: RevokeSecurityGroupEgress
+
+Protocol:    TCP
+From port:   110
+To port:     110
+Destination: 0.0.0.0/0
+```
+
+The response again records:
+
+```text
+"_return": true
+```
+
+confirming that the revoke operation succeeded.
+
+#### Forensic Reconstruction
+
+The key CloudTrail fields answer the main questions an investigator would ask:
+
+| Question | CloudTrail field | Evidence |
+|---|---|---|
+| Who performed the action? | `userIdentity` | IAM user |
+| Was MFA used? | `sessionContext.attributes.mfaAuthenticated` | `true` |
+| What happened? | `eventName` | `AuthorizeSecurityGroupEgress` / `RevokeSecurityGroupEgress` |
+| Which AWS service handled it? | `eventSource` | `ec2.amazonaws.com` |
+| When did it happen? | `eventTime` | `07:52:36Z` / `07:52:48Z` |
+| In which Region? | `awsRegion` | `eu-west-2` |
+| Where did the request originate? | `sourceIPAddress`, `userAgent` | source redacted; browser details retained |
+| What configuration changed? | `requestParameters` | TCP `110` to `0.0.0.0/0` |
+| Was it a management event? | `managementEvent` | `true` |
+| Did the API operation succeed? | `responseElements._return` | `true` |
+
+`requestParameters` is particularly useful because it records the exact configuration that was changed rather than merely stating that the Security Group was modified.
+
+Together, the two events reconstruct the complete sequence:
+
+```text
+2026-09-21T07:52:36Z
+AuthorizeSecurityGroupEgress
+        ↓
+TCP 110 → 0.0.0.0/0 added
+        ↓
+12 seconds
+        ↓
+2026-09-21T07:52:48Z
+RevokeSecurityGroupEgress
+        ↓
+TCP 110 → 0.0.0.0/0 removed
+```
+
+The containing CloudTrail log file has the filename timestamp:
+
+```text
+20260921T0755Z
+```
+
+while the two API events occurred at:
+
+```text
+07:52:36Z
+07:52:48Z
+```
+
+This shows that the events were delivered into a CloudTrail log object within a few minutes of the API activity.
+
+An exact delivery delay is not claimed because the timestamp embedded in the log filename does not establish the precise S3 object-arrival time.
+
+---
+
+### 8f — Trail Delivery Is Not Retroactive
+
+The Security Group egress-hardening work documented in Section 7 was performed before this CloudTrail trail was created.
+
+Those earlier actions are therefore not presented as events delivered by this trail to S3.
+
+The temporary POP3 rule was deliberately created after the trail was active so that a known management event could be generated and then located in the delivered log files.
+
+CloudTrail Event History and an S3-delivering trail serve different purposes.
+
+```text
+CloudTrail Event History
+        ↓
+Recent management-event lookup
+
+CloudTrail Trail
+        ↓
+Ongoing log delivery
+        ↓
+Amazon S3
+        ↓
+Longer-term retention
+```
+
+Creating the trail does not cause earlier Event History records to be retroactively written into the trail's historical S3 log path.
+
+The POP3 test therefore establishes evidence generated after persistent trail delivery was configured.
+
+---
+
+### 8g — Audit Integrity Limitation
+
+The trail currently delivers its logs to an S3 bucket within the same AWS account being audited.
+
+This creates a trust-boundary limitation.
+
+A sufficiently privileged principal that compromises the account and gains control over both CloudTrail and the destination S3 bucket could attempt to interfere with the account's own audit evidence.
+
+The current trail has:
+
+```text
+Log file validation: Enabled
+```
+
+This provides an integrity mechanism for validating delivered CloudTrail log files.
+
+However, integrity validation is different from preventing deletion or modification.
+
+The current design can therefore be represented as:
+
+```text
+Workload Account
+      │
+      ├── EC2 / S3 / Security Groups
+      │
+      ├── CloudTrail
+      │
+      └── CloudTrail Log Bucket
+```
+
+The workload and its audit records remain within the same administrative trust boundary.
+
+A stronger production architecture would separate those responsibilities:
+
+```text
+AWS Organization
+        ↓
+Organization Trail
+        ↓
+Dedicated Logging Account
+        ↓
+Protected S3 Log Bucket
+        ↓
+S3 Object Lock / retention controls
+        ↓
+Logging-account-controlled KMS key
+```
+
+In that design, workload accounts would not control the final audit-log storage location.
+
+**Current mitigation:** CloudTrail log file validation is enabled.
+
+**Current limitation:** the trail and destination bucket remain within the same AWS account.
+
+**Status:** `Accepted limitation for this single-account lab`.
