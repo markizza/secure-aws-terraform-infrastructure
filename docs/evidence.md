@@ -1363,3 +1363,518 @@ In that design, workload accounts would not control the final audit-log storage 
 **Current limitation:** the trail and destination bucket remain within the same AWS account.
 
 **Status:** `Accepted limitation for this single-account lab`.
+
+## 9. Terraform Infrastructure Rebuild and Reproducibility
+
+The manually tested AWS architecture was recreated using Terraform and then tested through a complete destroy-and-rebuild cycle.
+
+The purpose of this test was to prove that the environment could be reproduced from configuration rather than depending on manually created AWS resources.
+
+### 9a — Destroy Plan
+
+Before removing the infrastructure, I inspected the proposed destruction using:
+
+```powershell
+terraform plan -destroy
+```
+
+Verbatim output with sensitive identifiers redacted:
+
+```text
+PS C:\Users\VICTUS\projects\secure-aws-terraform-infrastructure\terraform> terraform plan -destroy
+data.aws_ami.ubuntu: Reading...
+aws_vpc.main: Refreshing state... [id=[VPC-ID-REDACTED]]
+data.aws_ami.ubuntu: Read complete after 0s [id=[AMI-ID-REDACTED]]
+aws_internet_gateway.main: Refreshing state... [id=[IGW-ID-REDACTED]]
+aws_route_table.private: Refreshing state... [id=[PRIVATE-RT-ID-REDACTED]]
+aws_route_table.public: Refreshing state... [id=[PUBLIC-RT-ID-REDACTED]]
+aws_subnet.private: Refreshing state... [id=[PRIVATE-SUBNET-ID-REDACTED]]
+aws_subnet.public: Refreshing state... [id=[PUBLIC-SUBNET-ID-REDACTED]]
+aws_security_group.ec2: Refreshing state... [id=[SG-ID-REDACTED]]
+aws_vpc_security_group_ingress_rule.ssh: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.dns_udp: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.dns_tcp: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.https: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.http: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_route_table_association.private: Refreshing state... [id=[RT-ASSOCIATION-ID-REDACTED]]
+aws_instance.public: Refreshing state... [id=[INSTANCE-ID-REDACTED]]
+aws_route_table_association.public: Refreshing state... [id=[RT-ASSOCIATION-ID-REDACTED]]
+aws_route.public_internet: Refreshing state... [id=[ROUTE-ID-REDACTED]]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the
+following symbols:
+  - destroy
+
+Terraform will perform the following actions:
+
+  # aws_instance.public will be destroyed
+  - resource "aws_instance" "public" {
+      - ami                                  = "[AMI-ID-REDACTED]" -> null
+      - arn                                  = "arn:aws:ec2:eu-west-2:[ACCOUNT-ID-REDACTED]:instance/[INSTANCE-ID-REDACTED]" -> null
+      - associate_public_ip_address          = true -> null
+      - availability_zone                    = "eu-west-2c" -> null
+
+... middle of Terraform resource detail omitted ...
+
+Plan: 0 to add, 0 to change, 16 to destroy.
+
+Changes to Outputs:
+  - ec2_instance_id   = "[INSTANCE-ID-REDACTED]" -> null
+  - ec2_private_ip    = "10.0.1.107" -> null
+  - ec2_public_ip     = "[PUBLIC-IP-REDACTED]" -> null
+  - private_subnet_id = "[PRIVATE-SUBNET-ID-REDACTED]" -> null
+  - public_subnet_id  = "[PUBLIC-SUBNET-ID-REDACTED]" -> null
+  - vpc_id            = "[VPC-ID-REDACTED]" -> null
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Note: You didn't use the -out option to save this plan, so Terraform can't guarantee to take exactly these actions if
+you run "terraform apply" now.
+```
+
+The destroy plan therefore showed:
+
+```text
+Plan: 0 to add, 0 to change, 16 to destroy.
+```
+
+No resources were proposed for creation or modification.
+
+---
+
+### 9b — Complete Infrastructure Destruction
+
+The destruction was then performed using:
+
+```powershell
+terraform destroy
+```
+
+Verbatim output with sensitive identifiers redacted:
+
+```text
+PS C:\Users\VICTUS\projects\secure-aws-terraform-infrastructure\terraform> terraform destroy
+data.aws_ami.ubuntu: Reading...
+aws_vpc.main: Refreshing state... [id=[VPC-ID-REDACTED]]
+data.aws_ami.ubuntu: Read complete after 0s [id=[AMI-ID-REDACTED]]
+aws_internet_gateway.main: Refreshing state... [id=[IGW-ID-REDACTED]]
+aws_route_table.private: Refreshing state... [id=[PRIVATE-RT-ID-REDACTED]]
+aws_route_table.public: Refreshing state... [id=[PUBLIC-RT-ID-REDACTED]]
+aws_subnet.private: Refreshing state... [id=[PRIVATE-SUBNET-ID-REDACTED]]
+aws_subnet.public: Refreshing state... [id=[PUBLIC-SUBNET-ID-REDACTED]]
+aws_security_group.ec2: Refreshing state... [id=[SG-ID-REDACTED]]
+aws_route_table_association.private: Refreshing state... [id=[RT-ASSOCIATION-ID-REDACTED]]
+aws_route.public_internet: Refreshing state... [id=[ROUTE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.dns_tcp: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.https: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_ingress_rule.ssh: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.http: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.dns_udp: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_instance.public: Refreshing state... [id=[INSTANCE-ID-REDACTED]]
+aws_route_table_association.public: Refreshing state... [id=[RT-ASSOCIATION-ID-REDACTED]]
+
+... Terraform destroy plan detail omitted ...
+
+Do you really want to destroy all resources?
+  Terraform will destroy all your managed infrastructure, as shown above.
+  There is no undo. Only 'yes' will be accepted to confirm.
+
+  Enter a value: yes
+
+aws_route_table_association.public: Destroying... [id=[RT-ASSOCIATION-ID-REDACTED]]
+aws_route.public_internet: Destroying... [id=[ROUTE-ID-REDACTED]]
+aws_instance.public: Destroying... [id=[INSTANCE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.dns_udp: Destroying... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.http: Destroying... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_ingress_rule.ssh: Destroying... [id=[SG-RULE-ID-REDACTED]]
+aws_route_table_association.private: Destroying... [id=[RT-ASSOCIATION-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.https: Destroying... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.dns_tcp: Destroying... [id=[SG-RULE-ID-REDACTED]]
+aws_route_table_association.private: Destruction complete after 0s
+aws_route_table_association.public: Destruction complete after 0s
+aws_subnet.private: Destroying... [id=[PRIVATE-SUBNET-ID-REDACTED]]
+aws_route_table.private: Destroying... [id=[PRIVATE-RT-ID-REDACTED]]
+aws_vpc_security_group_ingress_rule.ssh: Destruction complete after 0s
+aws_vpc_security_group_egress_rule.dns_udp: Destruction complete after 0s
+aws_vpc_security_group_egress_rule.dns_tcp: Destruction complete after 1s
+aws_vpc_security_group_egress_rule.http: Destruction complete after 1s
+aws_vpc_security_group_egress_rule.https: Destruction complete after 1s
+aws_route.public_internet: Destruction complete after 1s
+aws_internet_gateway.main: Destroying... [id=[IGW-ID-REDACTED]]
+aws_route_table.public: Destroying... [id=[PUBLIC-RT-ID-REDACTED]]
+aws_subnet.private: Destruction complete after 1s
+aws_route_table.private: Destruction complete after 1s
+aws_route_table.public: Destruction complete after 0s
+aws_instance.public: Still destroying... [id=[INSTANCE-ID-REDACTED], 00m10s elapsed]
+aws_internet_gateway.main: Still destroying... [id=[IGW-ID-REDACTED], 00m10s elapsed]
+aws_instance.public: Still destroying... [id=[INSTANCE-ID-REDACTED], 00m20s elapsed]
+aws_internet_gateway.main: Still destroying... [id=[IGW-ID-REDACTED], 00m20s elapsed]
+aws_internet_gateway.main: Destruction complete after 27s
+aws_instance.public: Still destroying... [id=[INSTANCE-ID-REDACTED], 00m30s elapsed]
+aws_instance.public: Destruction complete after 30s
+aws_security_group.ec2: Destroying... [id=[SG-ID-REDACTED]]
+aws_subnet.public: Destroying... [id=[PUBLIC-SUBNET-ID-REDACTED]]
+aws_subnet.public: Destruction complete after 1s
+aws_security_group.ec2: Destruction complete after 1s
+aws_vpc.main: Destroying... [id=[VPC-ID-REDACTED]]
+aws_vpc.main: Destruction complete after 0s
+
+Destroy complete! Resources: 16 destroyed.
+```
+
+The result confirmed that all `16` Terraform-managed resources were removed.
+
+---
+
+### 9c — Terraform State After Destruction
+
+Immediately after the completed destroy operation, Terraform state was checked:
+
+```text
+PS C:\Users\VICTUS\projects\secure-aws-terraform-infrastructure\terraform> terraform state list
+PS C:\Users\VICTUS\projects\secure-aws-terraform-infrastructure\terraform>
+```
+
+No resource addresses were returned.
+
+This confirmed that Terraform state contained no remaining managed infrastructure resources.
+
+The `.tf` configuration files still remained locally, demonstrating the distinction between configuration and state.
+
+---
+
+### 9d — Rebuild Plan
+
+With the Terraform configuration still present but the managed infrastructure removed, another plan was generated.
+
+Verbatim beginning of the plan with identifiers redacted:
+
+```text
+PS C:\Users\VICTUS\projects\secure-aws-terraform-infrastructure\terraform> terraform plan
+data.aws_ami.ubuntu: Reading...
+data.aws_ami.ubuntu: Read complete after 0s [id=[AMI-ID-REDACTED]]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the
+following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # aws_instance.public will be created
+  + resource "aws_instance" "public" {
+      + ami                                  = "[AMI-ID-REDACTED]"
+      + arn                                  = (known after apply)
+      + associate_public_ip_address          = true
+      + availability_zone                    = (known after apply)
+      + disable_api_stop                     = (known after apply)
+      + disable_api_termination              = (known after apply)
+      + ebs_optimized                        = (known after apply)
+      + enable_primary_ipv6                  = (known after apply)
+      + force_destroy                        = false
+      + get_password_data                    = false
+      + host_id                              = (known after apply)
+      + host_resource_group_arn              = (known after apply)
+      + iam_instance_profile                 = (known after apply)
+      + id                                   = (known after apply)
+      + instance_initiated_shutdown_behavior = (known after apply)
+      + instance_lifecycle                   = (known after apply)
+      + instance_state                       = (known after apply)
+      + instance_type                        = "t3.micro"
+```
+
+The middle of the resource-by-resource plan is omitted here for readability.
+
+Verbatim end of the plan with the trusted SSH source redacted:
+
+```text
+  # aws_vpc_security_group_ingress_rule.ssh will be created
+  + resource "aws_vpc_security_group_ingress_rule" "ssh" {
+      + arn                    = (known after apply)
+      + cidr_ipv4              = "[TRUSTED-SSH-CIDR-REDACTED]"
+      + description            = "SSH from trusted public IP"
+      + from_port              = 22
+      + id                     = (known after apply)
+      + ip_protocol            = "tcp"
+      + region                 = "eu-west-2"
+      + security_group_id      = (known after apply)
+      + security_group_rule_id = (known after apply)
+      + tags_all               = {}
+      + to_port                = 22
+    }
+
+Plan: 16 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  + ec2_instance_id   = (known after apply)
+  + ec2_private_ip    = (known after apply)
+  + ec2_public_ip     = (known after apply)
+  + private_subnet_id = (known after apply)
+  + public_subnet_id  = (known after apply)
+  + vpc_id            = (known after apply)
+```
+
+Terraform therefore detected that all `16` managed resources defined by the configuration were absent and proposed recreating them.
+
+---
+
+### 9e — Infrastructure Recreated from Terraform
+
+The rebuild was then performed using:
+
+```powershell
+terraform apply
+```
+
+Verbatim beginning of the apply command:
+
+```text
+PS C:\Users\VICTUS\projects\secure-aws-terraform-infrastructure\terraform> terraform apply
+data.aws_ami.ubuntu: Reading...
+data.aws_ami.ubuntu: Read complete after 0s [id=[AMI-ID-REDACTED]]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the
+following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # aws_instance.public will be created
+  + resource "aws_instance" "public" {
+      + ami                                  = "[AMI-ID-REDACTED]"
+      + arn                                  = (known after apply)
+      + associate_public_ip_address          = true
+      + availability_zone                    = (known after apply)
+      + disable_api_stop                     = (known after apply)
+      + disable_api_termination              = (known after apply)
+      + ebs_optimized                        = (known after apply)
+      + enable_primary_ipv6                  = (known after apply)
+      + force_destroy                        = false
+      + get_password_data                    = false
+      + host_id                              = (known after apply)
+      + host_resource_group_arn              = (known after apply)
+      + iam_instance_profile                 = (known after apply)
+      + id                                   = (known after apply)
+      + instance_initiated_shutdown_behavior = (known after apply)
+      + instance_lifecycle                   = (known after apply)
+      + instance_state                       = (known after apply)
+      + instance_type                        = "t3.micro"
+```
+
+The middle of the repeated Terraform plan is omitted.
+
+After approval, Terraform created the resources:
+
+```text
+aws_vpc.main: Creating...
+aws_vpc.main: Creation complete after 2s [id=[VPC-ID-REDACTED]]
+aws_internet_gateway.main: Creating...
+aws_route_table.private: Creating...
+aws_security_group.ec2: Creating...
+aws_subnet.private: Creating...
+aws_subnet.public: Creating...
+aws_route_table.public: Creating...
+aws_internet_gateway.main: Creation complete after 0s [id=[IGW-ID-REDACTED]]
+aws_route_table.public: Creation complete after 0s [id=[PUBLIC-RT-ID-REDACTED]]
+aws_route.public_internet: Creating...
+aws_route_table.private: Creation complete after 1s [id=[PRIVATE-RT-ID-REDACTED]]
+aws_subnet.private: Creation complete after 1s [id=[PRIVATE-SUBNET-ID-REDACTED]]
+aws_route_table_association.private: Creating...
+aws_route_table_association.private: Creation complete after 0s [id=[RT-ASSOCIATION-ID-REDACTED]]
+aws_route.public_internet: Creation complete after 1s [id=[ROUTE-ID-REDACTED]]
+aws_security_group.ec2: Creation complete after 2s [id=[SG-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.https: Creating...
+aws_vpc_security_group_egress_rule.dns_udp: Creating...
+aws_vpc_security_group_egress_rule.dns_tcp: Creating...
+aws_vpc_security_group_ingress_rule.ssh: Creating...
+aws_vpc_security_group_egress_rule.http: Creating...
+aws_vpc_security_group_egress_rule.dns_tcp: Creation complete after 0s [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.dns_udp: Creation complete after 0s [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.http: Creation complete after 0s [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_ingress_rule.ssh: Creation complete after 0s [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.https: Creation complete after 0s [id=[SG-RULE-ID-REDACTED]]
+aws_subnet.public: Still creating... [00m10s elapsed]
+aws_subnet.public: Creation complete after 13s [id=[PUBLIC-SUBNET-ID-REDACTED]]
+aws_route_table_association.public: Creating...
+aws_instance.public: Creating...
+aws_route_table_association.public: Creation complete after 0s [id=[RT-ASSOCIATION-ID-REDACTED]]
+aws_instance.public: Still creating... [00m10s elapsed]
+aws_instance.public: Creation complete after 13s [id=[INSTANCE-ID-REDACTED]]
+
+Apply complete! Resources: 16 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+ec2_instance_id = "[INSTANCE-ID-REDACTED]"
+ec2_private_ip = "10.0.1.104"
+ec2_public_ip = "[PUBLIC-IP-REDACTED]"
+private_subnet_id = "[PRIVATE-SUBNET-ID-REDACTED]"
+public_subnet_id = "[PUBLIC-SUBNET-ID-REDACTED]"
+vpc_id = "[VPC-ID-REDACTED]"
+```
+
+The rebuilt resources received new AWS-generated identifiers, which was expected.
+
+---
+
+### 9f — Outputs After Rebuild
+
+The Terraform outputs were checked immediately after the rebuild:
+
+```text
+PS C:\Users\VICTUS\projects\secure-aws-terraform-infrastructure\terraform> terraform output
+ec2_instance_id = "[INSTANCE-ID-REDACTED]"
+ec2_private_ip = "10.0.1.104"
+ec2_public_ip = "[PUBLIC-IP-REDACTED]"
+private_subnet_id = "[PRIVATE-SUBNET-ID-REDACTED]"
+public_subnet_id = "[PUBLIC-SUBNET-ID-REDACTED]"
+vpc_id = "[VPC-ID-REDACTED]"
+```
+
+This confirmed that Terraform had populated the configured outputs with values from the newly recreated environment.
+
+---
+
+### 9g — Internet Connectivity After Rebuild
+
+After connecting to the rebuilt EC2 instance, package repository connectivity was tested again:
+
+```text
+ubuntu@ip-10-0-1-104:~$ sudo apt update
+Hit:1 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble InRelease
+Get:2 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+Get:3 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
+Hit:4 http://security.ubuntu.com/ubuntu noble-security InRelease
+
+... package-list output omitted ...
+
+Fetched 31.6 MB in 5s (6128 kB/s)
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+All packages are up to date.
+```
+
+This confirmed that the rebuilt public routing and Security Group egress configuration allowed the EC2 instance to reach the required Ubuntu repositories.
+
+---
+
+### 9h — IMDSv2 Enforcement After Rebuild
+
+A tokenless metadata request was tested first:
+
+```text
+ubuntu@ip-10-0-1-104:~$ curl -v http://169.254.169.254/latest/meta-data/instance-id
+*   Trying 169.254.169.254:80...
+* Connected to 169.254.169.254 (169.254.169.254) port 80
+> GET /latest/meta-data/instance-id HTTP/1.1
+> Host: 169.254.169.254
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+< HTTP/1.1 401 Unauthorized
+< Content-Length: 0
+< Date: Sat, 17 Oct 2026 18:24:53 GMT
+< Server: EC2ws
+< Connection: close
+< Content-Type: text/plain
+<
+* Closing connection
+```
+
+The metadata service was reachable but rejected tokenless access with:
+
+```text
+HTTP/1.1 401 Unauthorized
+```
+
+An IMDSv2 token was then requested and used successfully:
+
+```text
+ubuntu@ip-10-0-1-104:~$ TOKEN=$(curl -X PUT \
+  "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+
+curl \
+  -H "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/meta-data/instance-id
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100    56  100    56    0     0   4164      0 --:--:-- --:--:-- --:--:--  4307
+[INSTANCE-ID-REDACTED]ubuntu@ip-10-0-1-104:~$
+```
+
+This confirmed that the Terraform rebuild preserved the intended IMDSv2 requirement.
+
+---
+
+### 9i — Final Drift Check
+
+After the rebuilt environment had been tested, Terraform was run again.
+
+Verbatim output with AWS-generated identifiers redacted:
+
+```text
+PS C:\Users\VICTUS\projects\secure-aws-terraform-infrastructure\terraform> terraform plan
+data.aws_ami.ubuntu: Reading...
+aws_vpc.main: Refreshing state... [id=[VPC-ID-REDACTED]]
+data.aws_ami.ubuntu: Read complete after 0s [id=[AMI-ID-REDACTED]]
+aws_route_table.public: Refreshing state... [id=[PUBLIC-RT-ID-REDACTED]]
+aws_route_table.private: Refreshing state... [id=[PRIVATE-RT-ID-REDACTED]]
+aws_internet_gateway.main: Refreshing state... [id=[IGW-ID-REDACTED]]
+aws_security_group.ec2: Refreshing state... [id=[SG-ID-REDACTED]]
+aws_subnet.public: Refreshing state... [id=[PUBLIC-SUBNET-ID-REDACTED]]
+aws_subnet.private: Refreshing state... [id=[PRIVATE-SUBNET-ID-REDACTED]]
+aws_route.public_internet: Refreshing state... [id=[ROUTE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.dns_tcp: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_ingress_rule.ssh: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.dns_udp: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.http: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_vpc_security_group_egress_rule.https: Refreshing state... [id=[SG-RULE-ID-REDACTED]]
+aws_route_table_association.public: Refreshing state... [id=[RT-ASSOCIATION-ID-REDACTED]]
+aws_route_table_association.private: Refreshing state... [id=[RT-ASSOCIATION-ID-REDACTED]]
+aws_instance.public: Refreshing state... [id=[INSTANCE-ID-REDACTED]]
+
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration and found no differences, so no changes are
+needed.
+PS C:\Users\VICTUS\projects\secure-aws-terraform-infrastructure\terraform>
+```
+
+The final plan therefore detected no configuration drift.
+
+---
+
+### 9j — Result
+
+**Result:** `Confirmed`
+
+The test demonstrated that:
+
+- Terraform proposed destruction of all `16` managed resources
+- all `16` resources were successfully destroyed
+- `terraform state list` returned no managed resources afterwards
+- the Terraform configuration remained available locally
+- Terraform subsequently proposed recreating all `16` resources
+- Terraform successfully recreated all `16` resources from configuration
+- new AWS-generated resource identifiers were assigned automatically
+- internet connectivity worked after recreation
+- IMDSv2 enforcement remained effective after recreation
+- the final `terraform plan` returned `No changes`
+
+The environment was therefore successfully destroyed and reproduced from Terraform configuration without manually rebuilding the AWS network resources.
+
+### 9k — EBS Root Volume Encryption Verification
+
+The rebuilt EC2 instance's root EBS volume was checked directly using the AWS CLI.
+
+Verbatim output with the volume ID redacted:
+
+```text
+------------------------------------------------------
+|                   DescribeVolumes                  |
++-----------+-------------------------+--------------+
+| Encrypted |        VolumeId         | VolumeType   |
++-----------+-------------------------+--------------+
+|  True     |  [VOLUME-ID-REDACTED]   |  gp3         |
++-----------+-------------------------+--------------+
