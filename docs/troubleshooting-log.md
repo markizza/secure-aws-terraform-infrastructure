@@ -186,3 +186,196 @@ A new SSH connection then succeeded immediately.
 ### Lesson
 
 A public IPv4 address and attached Internet Gateway are not enough on their own; the subnet also needs a route to the Internet Gateway so internet connections have a working return path.
+
+## Entry 003 — Terraform Plan Included More Resources Than Expected
+
+Date: 2026-10-17
+
+### Problem
+
+After adding the EC2 Security Group and its ingress and egress rules, I expected Terraform to propose only the six newly added Security Group resources.
+
+My prediction was:
+
+```text
+Plan: 6 to add, 0 to change, 0 to destroy.
+```
+
+Instead, Terraform reported:
+
+```text
+Plan: 11 to add, 0 to change, 0 to destroy.
+```
+
+The additional five resources were the public and private route-table resources from the previous stage.
+
+### Evidence
+
+The plan included:
+
+```text
+aws_route.public_internet
+aws_route_table.private
+aws_route_table.public
+aws_route_table_association.private
+aws_route_table_association.public
+aws_security_group.ec2
+aws_vpc_security_group_egress_rule.dns_tcp
+aws_vpc_security_group_egress_rule.dns_udp
+aws_vpc_security_group_egress_rule.http
+aws_vpc_security_group_egress_rule.https
+aws_vpc_security_group_ingress_rule.ssh
+```
+
+Terraform summarised the operation as:
+
+```text
+Plan: 11 to add, 0 to change, 0 to destroy.
+```
+
+### Hypothesis
+
+My initial expectation was based only on the Terraform code I had most recently added.
+
+I expected Terraform to plan the six Security Group-related resources because that was the current stage of the build.
+
+### Investigation
+
+I reviewed the resources listed in the plan rather than relying only on the final resource count.
+
+The plan showed that five route-related resources were still waiting to be created:
+
+```text
+aws_route.public_internet
+aws_route_table.private
+aws_route_table.public
+aws_route_table_association.private
+aws_route_table_association.public
+```
+
+These resources had already been added to the Terraform configuration during the previous stage, but I had only run `terraform plan` for that stage and had not yet run `terraform apply`.
+
+The six Security Group resources were therefore being planned together with the five previously configured but unapplied route resources:
+
+```text
+5 route resources
++
+6 Security Group resources
+=
+11 resources to add
+```
+
+Terraform was not planning resources based on the most recent section of code I had edited.
+
+It was comparing the complete desired configuration against the resources currently recorded in state.
+
+### Root Cause
+
+The route-table configuration existed in the `.tf` files but had not yet been applied.
+
+Terraform therefore correctly detected that those five resources were still absent from the managed infrastructure.
+
+When the Security Group configuration was subsequently added, the next `terraform plan` included both:
+
+- the five previously unapplied route resources
+- the six newly configured Security Group resources
+
+### Fix
+
+I reviewed the complete plan and confirmed that all eleven proposed resources were expected.
+
+I then applied the configuration:
+
+```powershell
+terraform apply
+```
+
+Terraform created the outstanding route-table resources and the Security Group resources.
+
+### Lesson
+
+`terraform plan` does not operate only on the code that was most recently edited.
+
+Terraform compares:
+
+```text
+Complete Terraform configuration
+            ↓
+       Terraform state
+            ↓
+   Real infrastructure
+```
+
+and calculates all actions required to make the infrastructure match the desired configuration.
+
+A resource can therefore continue appearing in later plans if it has been written into the configuration but has not yet been applied.
+
+This reinforced the importance of reading the actual resource addresses in a Terraform plan rather than judging the plan only by the final `X to add` count.
+
+
+## Entry 004 — AWS CLI Was Installed but Not Available in the Existing PowerShell Session
+
+Date: 2026-10-17
+
+### Problem
+
+Terraform needed authenticated access to AWS, so the AWS CLI was installed on the Windows workstation.
+
+The AWS CLI installation completed successfully, but the existing PowerShell session initially could not use the `aws` command.
+
+### Hypothesis
+
+My first concern was that the AWS CLI installation might have failed or that the executable had been installed incorrectly.
+
+### Investigation
+
+The AWS CLI had been installed using:
+
+```powershell
+irm https://awscli.amazonaws.com/v2/install.ps1 | iex
+```
+
+The installation placed AWS CLI under:
+
+```text
+C:\Users\VICTUS\AppData\Local\Programs\Amazon\AWSCLIV2
+```
+
+The installation itself had therefore completed.
+
+The issue was that the PowerShell process had already been running before the installer modified the Windows `PATH`.
+
+The existing shell was still using the environment variables it inherited when it started and had not automatically picked up the newly added AWS CLI path.
+
+A new terminal session was opened and the AWS CLI command then worked successfully.
+
+### Root Cause
+
+The AWS CLI was installed correctly, but the PowerShell session had not refreshed its environment after the installer updated `PATH`.
+
+The issue was therefore related to the current Windows process environment rather than the AWS CLI installation itself.
+
+### Fix
+
+Closed the existing terminal and opened a new PowerShell session.
+
+The AWS CLI was then available and its installation was verified before continuing with AWS authentication and Terraform.
+
+### Lesson
+
+On Windows, installing a command-line tool and updating the system or user `PATH` does not necessarily update environment variables inside terminal processes that are already running.
+
+When a newly installed command is reported as unavailable, it is useful to distinguish between:
+
+```text
+application not installed
+```
+
+and:
+
+```text
+application installed
+but current shell has stale PATH
+```
+
+before reinstalling or changing configuration unnecessarily.
