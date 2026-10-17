@@ -1878,3 +1878,201 @@ Verbatim output with the volume ID redacted:
 +-----------+-------------------------+--------------+
 |  True     |  [VOLUME-ID-REDACTED]   |  gp3         |
 +-----------+-------------------------+--------------+
+
+## 10. GitHub Actions Terraform CI Validation
+
+A GitHub Actions workflow was added to automatically validate the Terraform configuration on repository pushes and pull requests affecting the Terraform code.
+
+The workflow is stored at:
+
+```text
+.github/workflows/terraform-ci.yml
+```
+
+The CI job performs the following sequence:
+
+```text
+Repository checkout
+        ↓
+Terraform installation
+        ↓
+terraform init -backend=false
+        ↓
+terraform fmt -check -recursive
+        ↓
+terraform validate
+```
+
+### 10a — CI Workflow Configuration
+
+The workflow performs Terraform validation from the `terraform/` working directory.
+
+Relevant configuration:
+
+```yaml
+name: Terraform CI
+
+on:
+  push:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-ci.yml"
+
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: Terraform Validation
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init -backend=false
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        run: terraform validate
+```
+
+The workflow deliberately does not run:
+
+```text
+terraform apply
+terraform destroy
+```
+
+and does not require AWS credentials.
+
+Its purpose at this stage is static validation of the Terraform configuration rather than infrastructure deployment.
+
+### 10b — Successful GitHub Actions Run
+
+The workflow was triggered after the CI configuration was pushed to GitHub.
+
+All configured steps completed successfully:
+
+```text
+Checkout repository        ✓
+Setup Terraform            ✓
+Terraform Init             ✓
+Terraform Format Check     ✓
+Terraform Validate         ✓
+```
+Workflow run:
+
+```text
+Branch: main
+Commit: 5973132
+Status: Success
+```
+
+![Successful Terraform GitHub Actions workflow](images/ci-01-terraform-workflow-success.png)
+
+The successful run confirms that the repository could be checked out onto a clean GitHub-hosted runner, the required Terraform provider dependencies could be initialized, and the Terraform configuration passed both formatting and syntax/configuration validation.
+
+### 10c — Terraform Validation Steps
+
+The completed job showed each Terraform validation step succeeding independently.
+
+![Terraform CI validation steps](images/ci-02-terraform-validation-steps.png)
+
+The key automated checks were:
+
+```text
+terraform fmt -check -recursive
+```
+
+This verifies that the Terraform configuration conforms to Terraform's canonical formatting.
+
+and:
+
+```text
+terraform validate
+```
+
+This verifies that the Terraform configuration is syntactically valid and internally consistent.
+
+The initialization step used:
+
+```text
+terraform init -backend=false
+```
+
+This allowed the CI runner to install the required provider dependencies without attempting to use or modify the local Terraform state backend.
+
+### 10d — Result
+
+**Result:** `Passed`
+
+GitHub Actions successfully validated the Terraform configuration on a clean CI runner.
+
+This demonstrated that:
+
+- Terraform validation is no longer dependent only on the local development machine
+- formatting is checked automatically
+- Terraform configuration validity is checked automatically
+- the workflow can run without AWS credentials
+- the CI job has read-only repository permissions
+- infrastructure-changing commands are not executed by the validation workflow
+- future Terraform changes can be automatically checked when pushed to the repository
+
+The next CI stage is to add an Infrastructure as Code security scanner and evaluate its findings.
+
+### 11 Prediction — First Checkov Scan
+
+This is my first use of Checkov against the Terraform configuration.
+
+Based on the current design, I expect Checkov to identify several findings because the lab intentionally prioritises learning and controlled testing over production-grade hardening.
+
+I expect approximately **4–7 failed checks**.
+
+The resources I expect may be flagged are:
+
+- `aws_instance.public`
+  - because it intentionally receives a public IPv4 address
+  - because detailed CloudWatch monitoring is not enabled
+  - possibly because the instance does not use an IAM instance profile
+
+- `aws_subnet.public`
+  - because `map_public_ip_on_launch = true`
+
+- `aws_vpc.main`
+  - because VPC Flow Logs are not enabled
+
+- the EC2 Security Group / egress rules
+  - because HTTP and HTTPS egress are allowed to `0.0.0.0/0`
+
+I expect some controls to pass, including:
+
+- encrypted EC2 root storage
+- IMDSv2 enforcement
+- SSH restricted to a trusted `/32`
+- no unrestricted inbound SSH from `0.0.0.0/0`
+
+The purpose of the first scan is not to achieve zero findings. Each failed check will be reviewed and classified as:
+
+1. fixed
+2. accepted risk with technical reasoning
+3. not applicable to the scope of this lab
+
+I will compare the actual findings against this prediction and document any unexpected results.
