@@ -25,3 +25,6 @@ terraform.rc
 Thumbs.db
 .vscode/
 .idea/
+
+#aws private key
+*.pem
