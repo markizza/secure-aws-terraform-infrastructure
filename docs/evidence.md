@@ -2076,3 +2076,60 @@ The purpose of the first scan is not to achieve zero findings. Each failed check
 3. not applicable to the scope of this lab
 
 I will compare the actual findings against this prediction and document any unexpected results.
+
+### 12 Prediction — Checkov Finding CKV_AWS_135
+
+Checkov reported that the EC2 resource does not explicitly enable EBS optimisation.
+
+The instance uses `t3.micro`, and EBS optimisation is provided by default for this class of modern EC2 instance. However, the Terraform configuration does not currently state that requirement explicitly.
+
+I will add:
+
+```hcl
+ebs_optimized = true
+```
+
+### 13 Checkov Triage — CKV_AWS_135: EC2 EBS Optimization
+
+Checkov reported:
+
+```text
+CKV_AWS_135: "Ensure that EC2 is EBS optimized"
+FAILED for resource: aws_instance.public
+```
+
+I initially tested remediation by adding:
+
+```hcl
+ebs_optimized = true
+```
+
+Before applying the change, Terraform showed that the EC2 instance would be replaced:
+
+```text
+~ ebs_optimized = false -> true # forces replacement
+
+Plan: 1 to add, 0 to change, 1 to destroy.
+```
+
+The proposed change was not applied.
+
+I then queried AWS directly for the EBS optimization characteristics of the deployed instance type:
+
+```text
+--------------------------------------------------------------------------------
+|                             DescribeInstanceTypes                            |
++----------------------+---------------+------------------------+--------------+
+|  EbsOptimizedSupport | InstanceType  | MaximumBandwidthMbps   | MaximumIOPS  |
++----------------------+---------------+------------------------+--------------+
+|  default             |  t3.micro     |  2085                  |  11800       |
++----------------------+---------------+------------------------+--------------+
+```
+
+The `default` value confirms that `t3.micro` is EBS-optimized by default at the AWS platform level.
+
+Replacing the running EC2 instance solely to make the static-analysis check pass would therefore introduce unnecessary infrastructure churn without enabling a capability that the instance type does not already provide.
+
+**Triage decision:** `Not applicable`
+
+**Action:** No infrastructure change. The Checkov finding remains visible and is documented rather than suppressed.
