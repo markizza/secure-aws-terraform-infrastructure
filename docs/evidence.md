@@ -1,128 +1,4 @@
 # Project Evidence
-## 1. Successful SSH Connection
-
-This proves that the EC2 instance is reachable over SSH using the correct Ubuntu username and private key.
-```
-PS C:\Users\VICTUS> ssh -i "$HOME\.ssh\aws-lab-eu-west-2.pem" ubuntu@[PUBLIC-IP-REDACTED]
-Welcome to Ubuntu 24.04.4 LTS (GNU/Linux 6.17.0-1017-aws x86_64)
-ubuntu@ip-10-0-1-6:~$
-```
-## 2. SSH Authentication Failure with the Wrong Username
-
-This proves that TCP connectivity reached the host and the SSH service responded, but authentication failed because the EC2 Name tag was used as the login username instead of the Ubuntu AMI's default user.
-```
-PS C:\Users\VICTUS> ssh -i "$HOME\.ssh\aws-lab-eu-west-2.pem" secure-aws-tf-web-01-dev@[PUBLIC-IP-REDACTED]
-The authenticity of host '[PUBLIC-IP-REDACTED] ([PUBLIC-IP-REDACTED])' can't be established.
-ED25519 key fingerprint is SHA256:s/2gnY7o/rFClEYC3e60DHkjH5drNhE0hTFCX6rK154.
-This key is not known by any other names.
-Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
-Warning: Permanently added '[PUBLIC-IP-REDACTED]' (ED25519) to the list of known hosts.
-secure-aws-tf-web-01-dev@[PUBLIC-IP-REDACTED]: Permission denied (publickey).
-```
-## 3. Internet Connectivity from the Public EC2 Instance
-
-This proves that the instance can reach Ubuntu package repositories through the public subnet's internet route.
-```
-ubuntu@ip-10-0-1-6:~$ sudo apt update
-Hit:1 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble InRelease
-Get:2 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
-Get:3 http://eu-west-2.ec2.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
-[... output trimmed ...]
-Fetched 36.9 MB in 6s (6247 kB/s)
-Reading package lists... Done
-Building dependency tree... Done
-Reading state information... Done
-143 packages can be upgraded. Run 'apt list --upgradable' to see them.
-```
-## 4. Private Network Interface and Public-IP NAT Behaviour
-
-This proves that the EC2 instance holds only its private 10.0.1.6/24 address on ens5; the public IPv4 address is not configured on the instance itself because the Internet Gateway performs one-to-one NAT between the public address and the instance's private address.
-```
-ubuntu@ip-10-0-1-6:~$ ip addr show
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-    inet 127.0.0.1/8 scope host lo
-       valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host noprefixroute
-       valid_lft forever preferred_lft forever
-
-2: ens5: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9001 qdisc mq state UP group default qlen 1000
-    link/ether 06:f1:73:6d:d6:4d brd ff:ff:ff:ff:ff:ff
-    altname enp0s5
-    inet 10.0.1.6/24 metric 100 brd 10.0.1.255 scope global dynamic ens5
-       valid_lft 2443sec preferred_lft 2443sec
-    inet6 fe80::4f1:73ff:fe6d:d64d/64 scope link
-       valid_lft forever preferred_lft forever
-```
-
-## 5. IMDSv2 Enforcement
-
-### 5a — IMDSv1 Blocked
-
-This proves that the EC2 instance metadata service is reachable, but a metadata request without an IMDSv2 token is actively rejected with `401 Unauthorized`.
-
-```text
-ubuntu@ip-10-0-1-6:~$ curl -v http://169.254.169.254/
-*   Trying 169.254.169.254:80...
-* Connected to 169.254.169.254 (169.254.169.254) port 80
-> GET / HTTP/1.1
-> Host: 169.254.169.254
-> User-Agent: curl/8.5.0
-> Accept: */*
->
-< HTTP/1.1 401 Unauthorized
-< Content-Length: 0
-< Date: Thu, 17 Sep 2026 12:35:34 GMT
-< Server: EC2ws
-< Connection: close
-< Content-Type: text/plain
-<
-* Closing connection
-```
-
-The successful connection to `169.254.169.254:80` shows that the metadata service is reachable, while the `401 Unauthorized` response with `Content-Length: 0` shows that the tokenless request was actively refused rather than failing because the service was unreachable.
-
-### 5b — IMDSv2 Token Flow Succeeds
-
-This proves that an IMDSv2 session token can be obtained and successfully used to access EC2 instance metadata.
-
-```text
-ubuntu@ip-10-0-1-6:~$ TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-100    56  100    56    0     0  37308      0 --:--:-- --:--:-- --:--:-- 56000
-ubuntu@ip-10-0-1-6:~$ curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/
-ami-id
-ami-launch-index
-ami-manifest-path
-block-device-mapping/
-events/
-hostname
-identity-credentials/
-instance-action
-instance-id
-instance-life-cycle
-instance-type
-local-hostname
-local-ipv4
-mac
-metrics/
-network/
-placement/
-profile
-public-hostname
-public-ipv4
-public-keys/
-reservation-id
-security-groups
-services/
-ubuntu@ip-10-0-1-6:~$ curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id
-[INSTANCE-ID-REDACTED]@ip-10-0-1-6:~$
-```
-
-Together, `5a` and `5b` demonstrate that **IMDSv2 is enforced**: tokenless metadata access is rejected with `401 Unauthorized`, while the token-based IMDSv2 workflow succeeds.
-
-# Project Evidence
 
 This file records evidence collected while building, testing, and securing the `secure-aws-terraform-infrastructure` project.
 
@@ -1878,6 +1754,7 @@ Verbatim output with the volume ID redacted:
 +-----------+-------------------------+--------------+
 |  True     |  [VOLUME-ID-REDACTED]   |  gp3         |
 +-----------+-------------------------+--------------+
+```
 
 ## 10. GitHub Actions Terraform CI Validation
 
@@ -1952,6 +1829,11 @@ jobs:
 
       - name: Terraform Validate
         run: terraform validate
+      - name: Install Checkov
+        run: pip install checkov==3.3.29
+
+      - name: Checkov IaC Scan
+        run: checkov -d . --soft-fail
 ```
 
 The workflow deliberately does not run:
@@ -2036,9 +1918,8 @@ This demonstrated that:
 - infrastructure-changing commands are not executed by the validation workflow
 - future Terraform changes can be automatically checked when pushed to the repository
 
-The next CI stage is to add an Infrastructure as Code security scanner and evaluate its findings.
-
-### 11 Prediction — First Checkov Scan
+## 11. Infrastructure as Code Security Scanning
+### Prediction — First Checkov Scan
 
 This is my first use of Checkov against the Terraform configuration.
 
@@ -2077,7 +1958,7 @@ The purpose of the first scan is not to achieve zero findings. Each failed check
 
 I will compare the actual findings against this prediction and document any unexpected results.
 
-### 12 Prediction — Checkov Finding CKV_AWS_135
+### Prediction — Checkov Finding CKV_AWS_135
 
 Checkov reported that the EC2 resource does not explicitly enable EBS optimisation.
 
@@ -2089,7 +1970,7 @@ I will add:
 ebs_optimized = true
 ```
 
-### 13 Checkov Triage — CKV_AWS_135: EC2 EBS Optimization
+### Checkov Triage — CKV_AWS_135: EC2 EBS Optimization
 
 Checkov reported:
 
@@ -2134,7 +2015,7 @@ Replacing the running EC2 instance solely to make the static-analysis check pass
 
 **Action:** No infrastructure change. The Checkov finding remains visible and is documented rather than suppressed.
 
-### 14 Prediction — Checkov Finding CKV2_AWS_12
+### Prediction — Checkov Finding CKV2_AWS_12
 
 Checkov reported that the VPC default security group does not restrict all traffic.
 
@@ -2167,3 +2048,350 @@ to approximately:
 Passed checks: 34
 Failed checks: 5
 ```
+
+### Checkov Triage — CKV2_AWS_12: Default VPC Security Group
+
+**Initial Checkov result:** Failed
+
+Checkov reported:
+
+```text
+CKV2_AWS_12: "Ensure the default security group of every VPC restricts all traffic"
+FAILED for resource: aws_vpc.main
+```
+
+AWS automatically creates a default security group when a VPC is created.
+
+The project does not intentionally use the default security group because the EC2 instance is attached to a dedicated custom security group:
+
+```hcl
+vpc_security_group_ids = [aws_security_group.ec2.id]
+```
+
+To harden the unused default security group, I added the following Terraform resource:
+
+```hcl
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "secure-aws-tf-default-sg"
+  }
+}
+```
+
+No ingress or egress rules were declared.
+
+Before applying the change, Terraform reported:
+
+```text
+Plan: 1 to add, 0 to change, 0 to destroy.
+```
+
+This did not create a second default security group. Terraform adopted the VPC's existing default security group and brought it under management.
+
+Because no ingress or egress rules were defined, the default security group's existing traffic rules were removed.
+
+The change did not require replacement of the VPC, EC2 instance, subnet, or other existing infrastructure.
+
+**Triage decision:** `Fixed`
+
+**Action:** The VPC default security group is now explicitly managed by Terraform with no ingress or egress rules.
+
+**Validation:** The Checkov scan was rerun and it confirms that `CKV2_AWS_12` now passes.
+
+### Checkov Triage — CKV2_AWS_41: IAM Role Attached to EC2
+
+**Checkov result:** Failed
+
+Checkov reported:
+
+```text
+CKV2_AWS_41: "Ensure an IAM role is attached to EC2 instance"
+FAILED for resource: aws_instance.public
+```
+
+The EC2 instance does not currently require access to AWS APIs or other AWS services using instance credentials.
+
+Its purpose in this project is limited to:
+
+- validating public subnet connectivity
+- testing SSH access
+- validating controlled outbound connectivity
+- testing EC2 Instance Metadata Service v2
+- demonstrating Terraform-managed infrastructure
+
+The instance does not currently require access to services such as:
+
+```text
+Amazon S3
+AWS Systems Manager
+AWS Secrets Manager
+AWS Systems Manager Parameter Store
+CloudWatch Logs
+```
+
+Adding an IAM role purely to satisfy the static-analysis check would create an unnecessary AWS identity without a defined permission requirement.
+
+This would conflict with the principle of least privilege because the preferred design is to introduce an IAM role only when the workload has a specific AWS API requirement and then grant only the permissions required for that task.
+
+**Triage decision:** `Not applicable`
+
+**Action:** No IAM instance profile was added.
+
+The Checkov finding remains visible and is documented rather than suppressed.
+
+If the instance later requires access to an AWS service, an IAM role with a narrowly scoped policy should be introduced at that point.
+
+### Checkov Triage — CKV_AWS_88: EC2 Instance Has a Public IP
+
+**Checkov result:** Failed
+
+Checkov reported:
+
+```text
+CKV_AWS_88: "EC2 instance should not have public IP."
+FAILED for resource: aws_instance.public
+```
+
+The EC2 instance is intentionally deployed in the public subnet with:
+
+```hcl
+associate_public_ip_address = true
+```
+
+This is a deliberate architectural decision for the scope of this lab.
+
+The public EC2 instance was required to validate several of the project's networking and security objectives, including:
+
+- direct SSH connectivity from an external workstation
+- public subnet routing through an Internet Gateway
+- the effect of removing and restoring the public default route
+- internet-bound package repository connectivity
+- Security Group ingress restrictions
+- Terraform reconstruction of a publicly reachable EC2 workload
+
+Removing the public IPv4 address would fundamentally change the architecture and would require an alternative access mechanism such as a bastion host, VPN, AWS Systems Manager Session Manager, or other private-access design.
+
+Those alternatives are valid for a production environment but are outside the defined scope of this project.
+
+The risk associated with exposing the instance to the internet is reduced through several compensating controls.
+
+SSH access is restricted to a single trusted public IPv4 address:
+
+```hcl
+resource "aws_vpc_security_group_ingress_rule" "ssh" {
+  security_group_id = aws_security_group.ec2.id
+  cidr_ipv4         = var.ssh_cidr
+  from_port         = 22
+  to_port           = 22
+  ip_protocol       = "tcp"
+  description       = "SSH from trusted public IP"
+}
+```
+
+The value supplied to `ssh_cidr` uses a `/32` CIDR, rather than allowing SSH from:
+
+```text
+0.0.0.0/0
+```
+
+The Checkov scan separately confirmed that unrestricted SSH ingress was not present.
+
+Additional controls on the instance include:
+
+- IMDSv2 is required
+- the root EBS volume is encrypted
+- no unrestricted inbound HTTP or HTTPS traffic is permitted
+- Security Group egress is explicitly defined
+- the VPC default security group is restricted
+- the instance is used only as a controlled lab workload
+
+The public IP therefore represents a known and intentional exposure rather than an accidental configuration.
+
+For a production workload, I would prefer private instance placement with controlled administrative access rather than direct public SSH.
+
+**Triage decision:** `Accepted risk`
+
+**Action:** No infrastructure change.
+
+The finding remains visible in Checkov and is documented rather than suppressed.
+
+### Checkov Triage — CKV_AWS_130: Public Subnet Automatically Assigns Public IPv4 Addresses
+
+**Initial Checkov result:** Failed
+
+Checkov reported:
+
+```text
+CKV_AWS_130: "Ensure VPC subnets do not assign public IP by default"
+FAILED for resource: aws_subnet.public
+```
+
+The public subnet was originally configured with:
+
+```hcl
+map_public_ip_on_launch = true
+```
+
+This meant that resources launched into the subnet could receive a public IPv4 address automatically at subnet level.
+
+That behaviour was broader than required for this project.
+
+The EC2 instance already explicitly controls whether it receives a public IPv4 address using:
+
+```hcl
+associate_public_ip_address = true
+```
+
+The subnet configuration was therefore changed to:
+
+```hcl
+map_public_ip_on_launch = false
+```
+
+Before applying the change, Terraform reported:
+
+```text
+# aws_subnet.public will be updated in-place
+~ resource "aws_subnet" "public" {
+    ~ map_public_ip_on_launch = true -> false
+}
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+```
+
+The change was applied without replacing the subnet or EC2 instance.
+
+The deployed value was then verified:
+
+```text
+map_public_ip_on_launch = false
+```
+
+A subsequent Checkov scan confirmed that the finding had been resolved:
+
+```text
+CKV_AWS_130: "Ensure VPC subnets do not assign public IP by default"
+PASSED for resource: aws_subnet.public
+```
+
+The overall Checkov result improved from:
+
+```text
+Passed checks: 32, Failed checks: 7, Skipped checks: 0
+```
+
+to:
+
+```text
+Passed checks: 33, Failed checks: 6, Skipped checks: 0
+```
+
+This change applies the principle of explicit exposure: resources placed into the public subnet do not receive a public IPv4 address automatically. A workload must explicitly request one when the architecture requires it.
+
+**Triage decision:** `Fixed`
+
+**Action:** Disabled subnet-level automatic public IPv4 assignment while retaining explicit public IPv4 assignment on the intended EC2 instance.
+
+### Checkov Triage — CKV_AWS_126: EC2 Detailed Monitoring
+
+**Checkov result:** Failed
+
+Checkov reported:
+
+```text
+CKV_AWS_126: "Ensure that detailed monitoring is enabled for EC2 instances"
+FAILED for resource: aws_instance.public
+```
+
+The EC2 instance currently uses Amazon EC2 basic CloudWatch monitoring.
+
+Basic monitoring provides most EC2 metrics at five-minute intervals, whereas enabling detailed monitoring provides those metrics at one-minute intervals.
+
+Detailed monitoring also incurs additional CloudWatch charges.
+
+The purpose of this EC2 instance is to support a short-lived infrastructure and security lab rather than a production workload with operational service-level objectives, automated scaling, one-minute alerting, or continuous performance monitoring.
+
+The project already validates the controls relevant to its scope through direct testing, including:
+
+- SSH connectivity
+- route-table behaviour
+- Security Group restrictions
+- outbound internet connectivity
+- IMDSv2 enforcement
+- encrypted EBS storage
+- Terraform drift detection
+- Infrastructure as Code security scanning
+
+Enabling paid one-minute EC2 metrics would therefore provide limited additional value for this single-instance lab.
+
+In a production environment, particularly one requiring rapid alerting, capacity analysis, Auto Scaling decisions, or operational response, detailed monitoring would be enabled and incorporated into CloudWatch alarms and dashboards.
+
+**Triage decision:** `Accepted risk`
+
+**Action:** Retained EC2 basic monitoring.
+
+The Checkov finding remains visible and is documented rather than suppressed.
+
+**Reasoning:** The increased metric frequency is not required for the objectives of this temporary lab and would introduce an ongoing monitoring cost without a corresponding operational requirement.
+
+### Checkov Triage — CKV2_AWS_11: VPC Flow Logging
+
+**Checkov result:** Failed
+
+Checkov reported:
+
+```text
+CKV2_AWS_11: "Ensure VPC flow logging is enabled in all VPCs"
+FAILED for resource: aws_vpc.main
+```
+
+The Terraform-managed VPC does not currently have VPC Flow Logs enabled.
+
+This is a genuine observability gap.
+
+Without VPC Flow Logs, the environment does not retain centralised network-flow metadata showing accepted and rejected traffic at the VPC network-interface level.
+
+This is relevant because the project includes several networking and security controls, including:
+
+- public and private subnet routing
+- Internet Gateway connectivity
+- Security Group ingress and egress rules
+- SSH reachability
+- route removal and restoration testing
+- controlled outbound connectivity
+
+VPC Flow Logs would provide additional visibility into how traffic is accepted or rejected across those controls.
+
+The project previously included CloudTrail during an earlier manual stage, but that trail and its destination were later removed and are not part of the current environment.
+
+CloudTrail and VPC Flow Logs provide different types of visibility:
+
+```text
+CloudTrail
+    → AWS API and account activity
+
+VPC Flow Logs
+    → network-flow metadata
+```
+
+Enabling VPC Flow Logs would therefore improve network observability, but it would also require additional supporting resources such as a log destination, permissions, retention configuration, and associated logging/storage cost.
+
+For this project, the infrastructure is a small, short-lived learning environment rather than a continuously operated production workload.
+
+The main networking behaviours have already been validated directly through controlled tests, including route removal, SSH connectivity, Security Group restrictions, and outbound package access.
+
+I therefore chose not to introduce persistent VPC network logging solely to satisfy the static-analysis check.
+
+This decision leaves a known monitoring gap and would not be appropriate for a production environment where persistent network telemetry, incident investigation, or compliance logging is required.
+
+**Triage decision:** `Accepted risk`
+
+**Action:** No VPC Flow Log resource was added.
+
+The Checkov finding remains visible and is documented rather than suppressed.
+
+**Accepted risk:** The environment has no persistent VPC-level network-flow telemetry.
+
+**Future production control:** Enable VPC Flow Logs with an appropriate destination, retention period, IAM permissions, alerting strategy, and cost controls.

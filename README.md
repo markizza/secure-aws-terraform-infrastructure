@@ -105,7 +105,7 @@ The public subnet uses:
 10.0.1.0/24
 ```
 
-and has automatic public IPv4 assignment enabled.
+Automatic public IPv4 assignment is disabled, the instance requests for IPV4 address via `associate_public_ip_address`
 
 Its custom route table contains:
 
