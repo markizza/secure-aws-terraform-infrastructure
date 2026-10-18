@@ -654,9 +654,6 @@ The following have not yet been implemented:
 - evaluate replacing SSH administration with AWS Systems Manager Session Manager
 - manage or replace the currently external EC2 key pair through a more reproducible access strategy
 - migrate local Terraform state to a remote backend with state locking after the local-state workflow is fully understood
-- add GitHub Actions for Terraform formatting and validation
-- add Infrastructure as Code security scanning
-- evaluate tools such as Checkov or equivalent Terraform security scanners
 - evaluate more advanced HTTP/HTTPS egress filtering
 - refactor repeated Terraform configuration into reusable modules after the raw-resource implementation is fully understood
 

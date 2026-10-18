@@ -1918,8 +1918,84 @@ This demonstrated that:
 - infrastructure-changing commands are not executed by the validation workflow
 - future Terraform changes can be automatically checked when pushed to the repository
 
+### 10e — Checkov Security Scan Integrated into CI
+
+Checkov was added to the GitHub Actions pipeline after the Terraform formatting and validation checks.
+
+The CI workflow now performs:
+
+```text
+Repository checkout
+        ↓
+Terraform setup
+        ↓
+terraform init -backend=false
+        ↓
+terraform fmt -check -recursive
+        ↓
+terraform validate
+        ↓
+Checkov IaC security scan
+```
+
+The Checkov scan runs against the Terraform configuration on the GitHub-hosted runner.
+
+The security scan completed successfully as part of the CI workflow:
+
+![Successful Checkov CI scan](images/ci-03-checkov-scan-success.png)
+
+The scanner findings were not treated as a simple pass/fail exercise. Each original finding was reviewed and classified as either:
+
+```text
+Fixed
+Accepted risk
+Not applicable
+```
+
+The initial scan produced:
+
+```text
+Passed checks: 32
+Failed checks: 7
+Skipped checks: 0
+```
+
+The findings included issues relating to:
+
+```text
+public subnet IP assignment
+EC2 detailed monitoring
+EBS optimisation
+public EC2 addressing
+IAM instance roles
+VPC Flow Logs
+default VPC security group configuration
+```
+
+Two findings resulted in direct Terraform hardening changes:
+
+```text
+CKV_AWS_130
+Public subnet automatic IPv4 assignment
+→ Fixed
+
+CKV2_AWS_12
+Default VPC security group
+→ Fixed
+```
+
+Other findings were retained after technical review where the control was either not applicable to the current architecture or represented an explicitly accepted lab risk.
+
+No Checkov findings were hidden or suppressed simply to produce a clean scan.
+
+The CI pipeline currently treats Checkov as a non-blocking security control so that documented accepted risks remain visible without preventing the validation workflow from completing.
+
+**Result:** `Passed`
+
+The repository now has automated Terraform formatting, validation, and Infrastructure as Code security scanning on GitHub Actions.
+
 ## 11. Infrastructure as Code Security Scanning
-### Prediction — First Checkov Scan
+### 11a. Prediction — First Checkov Scan
 
 This is my first use of Checkov against the Terraform configuration.
 
@@ -1958,7 +2034,7 @@ The purpose of the first scan is not to achieve zero findings. Each failed check
 
 I will compare the actual findings against this prediction and document any unexpected results.
 
-### Prediction — Checkov Finding CKV_AWS_135
+### 11b. Prediction — Checkov Finding CKV_AWS_135
 
 Checkov reported that the EC2 resource does not explicitly enable EBS optimisation.
 
@@ -1970,7 +2046,7 @@ I will add:
 ebs_optimized = true
 ```
 
-### Checkov Triage — CKV_AWS_135: EC2 EBS Optimization
+### 11c. Checkov Triage — CKV_AWS_135: EC2 EBS Optimization
 
 Checkov reported:
 
@@ -2015,7 +2091,7 @@ Replacing the running EC2 instance solely to make the static-analysis check pass
 
 **Action:** No infrastructure change. The Checkov finding remains visible and is documented rather than suppressed.
 
-### Prediction — Checkov Finding CKV2_AWS_12
+### 11d. Prediction — Checkov Finding CKV2_AWS_12
 
 Checkov reported that the VPC default security group does not restrict all traffic.
 
@@ -2049,7 +2125,7 @@ Passed checks: 34
 Failed checks: 5
 ```
 
-### Checkov Triage — CKV2_AWS_12: Default VPC Security Group
+### 11e. Checkov Triage — CKV2_AWS_12: Default VPC Security Group
 
 **Initial Checkov result:** Failed
 
@@ -2100,7 +2176,7 @@ The change did not require replacement of the VPC, EC2 instance, subnet, or othe
 
 **Validation:** The Checkov scan was rerun and it confirms that `CKV2_AWS_12` now passes.
 
-### Checkov Triage — CKV2_AWS_41: IAM Role Attached to EC2
+### 11f. Checkov Triage — CKV2_AWS_41: IAM Role Attached to EC2
 
 **Checkov result:** Failed
 
@@ -2143,7 +2219,7 @@ The Checkov finding remains visible and is documented rather than suppressed.
 
 If the instance later requires access to an AWS service, an IAM role with a narrowly scoped policy should be introduced at that point.
 
-### Checkov Triage — CKV_AWS_88: EC2 Instance Has a Public IP
+### 11g. Checkov Triage — CKV_AWS_88: EC2 Instance Has a Public IP
 
 **Checkov result:** Failed
 
@@ -2217,7 +2293,7 @@ For a production workload, I would prefer private instance placement with contro
 
 The finding remains visible in Checkov and is documented rather than suppressed.
 
-### Checkov Triage — CKV_AWS_130: Public Subnet Automatically Assigns Public IPv4 Addresses
+### 11h. Checkov Triage — CKV_AWS_130: Public Subnet Automatically Assigns Public IPv4 Addresses
 
 **Initial Checkov result:** Failed
 
@@ -2282,6 +2358,8 @@ The overall Checkov result improved from:
 Passed checks: 32, Failed checks: 7, Skipped checks: 0
 ```
 
+This result was from the first scan and the current state after remediation is different
+
 to:
 
 ```text
@@ -2294,7 +2372,7 @@ This change applies the principle of explicit exposure: resources placed into th
 
 **Action:** Disabled subnet-level automatic public IPv4 assignment while retaining explicit public IPv4 assignment on the intended EC2 instance.
 
-### Checkov Triage — CKV_AWS_126: EC2 Detailed Monitoring
+### 11i. Checkov Triage — CKV_AWS_126: EC2 Detailed Monitoring
 
 **Checkov result:** Failed
 
@@ -2336,7 +2414,7 @@ The Checkov finding remains visible and is documented rather than suppressed.
 
 **Reasoning:** The increased metric frequency is not required for the objectives of this temporary lab and would introduce an ongoing monitoring cost without a corresponding operational requirement.
 
-### Checkov Triage — CKV2_AWS_11: VPC Flow Logging
+### 11j. Checkov Triage — CKV2_AWS_11: VPC Flow Logging
 
 **Checkov result:** Failed
 
