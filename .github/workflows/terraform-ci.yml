@@ -40,3 +40,9 @@ jobs:
 
       - name: Terraform Validate
         run: terraform validate
+
+      - name: Install Checkov
+        run: pip install checkov==3.3.29
+
+      - name: Checkov IaC Scan
+        run: checkov -d . --soft-fail

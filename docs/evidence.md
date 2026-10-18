@@ -2133,3 +2133,37 @@ Replacing the running EC2 instance solely to make the static-analysis check pass
 **Triage decision:** `Not applicable`
 
 **Action:** No infrastructure change. The Checkov finding remains visible and is documented rather than suppressed.
+
+### 14 Prediction — Checkov Finding CKV2_AWS_12
+
+Checkov reported that the VPC default security group does not restrict all traffic.
+
+AWS automatically creates a default security group with every VPC. The project does not intentionally use this group because the EC2 instance is attached to a dedicated custom security group.
+
+I will manage the VPC default security group using Terraform:
+
+```hcl
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "secure-aws-tf-default-sg"
+  }
+}
+```
+No ingress or egress rules will be declared.
+
+I expect Terraform to adopt the existing default security group and remove its default traffic rules without replacing the VPC or EC2 instance.
+
+I expect the plan to show one managed default security group being added to Terraform state and rule changes associated with that adoption.
+
+After applying the change, I expect `CKV2_AWS_12` to pass and the Checkov result to improve from:
+```
+Passed checks: 33
+Failed checks: 6
+```
+to approximately:
+```
+Passed checks: 34
+Failed checks: 5
+```
